@@ -9,13 +9,19 @@ class Controller:
         self._model = model
 
     def fillDDGenre(self):
-        pass
+        for g in self._model.idMapGenere:
+            self._view._ddGenre.options.append(ft.dropdown.Option(key=g, text=self._model.idMapGenere[g]))
+        self._view.update_page()
 
     def handleCreaGrafo(self, e):
-        pass
+        self.fillDDGenre()
+        genere = self._view._ddGenre.value
+        if not genere:
+            self._view.create_alert("Selezionare un genere!")
+            self._view.update_page()
+            return
+        self._model.creaGrafo(int(genere))
 
-    def handleCreaGrafo(self,e):
-        pass
 
     def handleCammino(self,e):
         pass
