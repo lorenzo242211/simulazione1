@@ -1,83 +1,130 @@
-import networkx as nx
-import collections
+import copy
 from database.DAO import DAO
-
-
+import networkx as nx
+from collections import defaultdict
+import itertools
 class Model:
     def __init__(self):
-        # Mappe "Globali" (Non dipendono dal singolo genere, quindi va bene caricarle una volta sola qui)
-        self.idMapGenere = {}
-        self.idMapPopolarita = {}
+        self._graph = nx.DiGraph()
+        self._idMap = {}
+        self._bestPath = []
 
-        for p in DAO.getPop():
-            self.idMapPopolarita[p[0]] = p[1]
+    def getBestPath(self, source):
 
-        for g in DAO.getGeneri():
-            self.idMapGenere[g[0]] = g[1]
+        self._bestPath = []
 
-        # Variabili relative al singolo Grafo (Verranno resettate in creaGrafo)
-        self.grafo = nx.DiGraph()
-        self.idMapArtisti = {}
-        self.dizionarioClienteArtisti = collections.defaultdict(set)
+        partial = [self._idMap[int(source)]]
 
-    def creaGrafo(self, genere):
-        # --- 1. RESET TOTALE DEI DATI DEL GRAFO ---
-        self.grafo.clear()
-        self.idMapArtisti.clear()  # FONDAMENTALE! Altrimenti tieni in memoria artisti di generi vecchi
-        self.dizionarioClienteArtisti.clear()
+        for _, v, data in self._graph.out_edges(self._idMap[int(source)], data=True):
+            partial.append(v)
 
-        # --- 2. CREAZIONE NODI ---
-        listaNodi = DAO.getAllNodi(genere)
-        if len(listaNodi) == 0:
-            print("attenzione nessun nodo")
-            return  # Se non ci sono nodi, fermo subito tutto
-
-        self.grafo.add_nodes_from(listaNodi)
-
-        # idmap artista id - nome
-        for artista in listaNodi:
-            self.idMapArtisti[artista.ArtistId] = artista
-
-        # --- 3. PREPARAZIONE DATI PER GLI ARCHI ---
-        archi = DAO.getArchi(genere)  # La query che estrae (Cliente, Artista)
-
-        for c, aID in archi:
-            # sfrutto dizionario di artisti del genere selezionato
-            if int(aID) in self.idMapArtisti:
-                self.dizionarioClienteArtisti[c].add(int(aID)) #essendo un set lo aggiunge una sola volta l' artista per cliente
-
-        # Stampa di controllo: .items() per vedere sia la chiave (cliente) che il valore (set di artisti)
-        for chiaveCliente, valoreSetArtisti in self.dizionarioClienteArtisti.items():
-            print(f"Cliente {chiaveCliente} - artisti:  {valoreSetArtisti}")
-        #cilcerei sui nodi e se artista in lista cliente 1 allora posso joinarlo con artsita 2 (!=) e faccio if popolarità
-        for chiaveCliente, valoreSetArtisti in self.dizionarioClienteArtisti.items():
-            listaArtisti = list(valoreSetArtisti)
-            for i in range(len(listaArtisti)):
-                for j in range(i+1, len(listaArtisti)):
-                    idartista1 = listaArtisti[i]
-                    idartista2 = listaArtisti[j]
-                    a1 = self.idMapArtisti[idartista1]
-                    a2 = self.idMapArtisti[idartista2]
-                    pop1 = self.idMapPopolarita[idartista1]
-                    pop2 = self.idMapPopolarita[idartista2]
-                    tot = pop1 + pop2
-                    if pop1 > pop2:
-                        self.grafo.add_edge(a1, a2, weight=tot)
-                    elif pop1 < pop2:
-                        self.grafo.add_edge(a2, a1, weight=tot)
-                    else: #pop1 == pop2
-                        self.grafo.add_edge(a1, a2, weight=tot)
-                        self.grafo.add_edge(a2, a1, weight=tot)
+            self._ricorsione(partial, data["weight"])
+            partial.pop()
 
 
+        return self._bestPath
 
-        print(self.getStatisticheGrafo())
-        
+    def _ricorsione(self, partial, lastWeight):
+
+        # update best solution
+        if len(partial) > len(self._bestPath):
+            self._bestPath = copy.deepcopy(partial)
+
+        current = partial[-1]
+
+        for _, successor, data in self._graph.out_edges(current, data=True):
+
+            weight = data["weight"]
+
+            # strictly decreasing weights
+            if weight > lastWeight:
+
+                # simple path
+                if successor not in partial:
+                    partial.append(successor)
+
+                    self._ricorsione(partial, weight)
+
+                    partial.pop()
+    def buildGraph(self, genere):
+        self._graph.clear()
+        self._artist = DAO.getAllArtistbyGenre(genere)
+        for a in self._artist:
+            self._idMap[a.ArtistID] = a
+
+        self._graph.add_nodes_from(self._artist)
+
+        custom_artist_list = DAO.getCustomerArtistCounts(genere)
+
+        customerMap = defaultdict(dict)
+
+        for customer_id, artist_id, ntracks in custom_artist_list:
+            customerMap[customer_id][artist_id] = ntracks
+
+        artist_popularity = defaultdict(int)
+
+        for customer, artists in customerMap.items():
+            for artist_id, ntracks in artists.items():
+                artist_popularity[artist_id] += ntracks
+
+        for customer_id, artists in customerMap.items():
+
+            for a, b in itertools.combinations(artists.keys(), 2):
+
+                pop_a = artist_popularity[a]
+                pop_b = artist_popularity[b]
+
+                weight = pop_a + pop_b
+
+                if pop_a < pop_b:
+                    self._graph.add_edge(self._idMap[a], self._idMap[b], weight=weight)
+                elif pop_a > pop_b:
+                    self._graph.add_edge(self._idMap[b], self._idMap[a], weight=weight)
+                else:
+                    self._graph.add_edge(self._idMap[a], self._idMap[b], weight=weight)
+                    self._graph.add_edge(self._idMap[b], self._idMap[a], weight=weight)
 
 
+    def getBestArtist(self):
 
+        bestArtist = None
+        bestScore = None
 
+        for v in self._graph.nodes():
 
+            outWeight = 0
+            for _, _, data in self._graph.out_edges(v, data=True):
+                outWeight += data["weight"]
 
-    def getStatisticheGrafo(self):
-        return self.grafo.number_of_nodes(), self.grafo.number_of_edges()
+            inWeight = 0
+            for _, _, data in self._graph.in_edges(v, data=True):
+                inWeight += data["weight"]
+
+            score = outWeight - inWeight
+
+            if bestScore is None or score > bestScore:
+                bestScore = score
+                bestArtist = v
+
+        return bestArtist.Name, bestScore
+
+    def getTop5Edges(self):
+
+        edges = sorted(
+            self._graph.edges(data=True),
+            key=lambda x: x[2]["weight"],
+            reverse=True
+        )
+
+        return edges[:5]
+
+    def getGenres(self):
+        return DAO.getAllGenres()
+
+    def getArtists(self):
+        return self._graph.nodes()
+    def getNumNodi(self):
+        return len(self._graph.nodes)
+
+    def getNumEdges(self):
+        return len(self._graph.edges)

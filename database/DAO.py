@@ -1,90 +1,70 @@
 from database.DB_connect import DBConnect
-from model.artista import Artista
+from model.artist import Artist
 
 class DAO():
-    def __init__(self):
-        pass
 
     @staticmethod
-    def getGeneri():
+    def getAllGenres():
         conn = DBConnect.get_connection()
 
-        result = []
+        results = []
 
         cursor = conn.cursor(dictionary=True)
-        query = """select * from Genre"""
+        query = "select distinct g.Name from genre g order by g.Name"
 
         cursor.execute(query)
+
         for row in cursor:
-            result.append((row["GenreId"], row["Name"]))
+            results.append(row["Name"])
 
         cursor.close()
         conn.close()
-        return result
+        return results
 
     @staticmethod
-    def getAllNodi(genere):
+    def getAllArtistbyGenre(genere):
         conn = DBConnect.get_connection()
 
-        result = []
+        results = []
 
         cursor = conn.cursor(dictionary=True)
-        query = """SELECT DISTINCT a.ArtistId, a.Name
-            FROM Artist a
-            JOIN Album alb ON a.ArtistId = alb.ArtistId
-            JOIN Track t ON alb.AlbumId = t.AlbumId
-            WHERE t.GenreId = %s"""
-            #ho usato le join molto comode, aggiungo incrocio gli if di altre tabelle in questo caso
-            #se artista album coincide con artista canzone e album id coincide con traccia album id
-            #faccio la where totale su se traccia genere = genere utente
-        cursor.execute(query, (genere,))
-        for row in cursor:
-            result.append(Artista(**row))
-
-        cursor.close()
-        conn.close()
-        return result
-
-    @staticmethod
-    def getPop():
-        conn = DBConnect.get_connection()
-
-        result = []
-
-        cursor = conn.cursor(dictionary=True)
-        query = """SELECT a.ArtistId, SUM(il.Quantity) as popolarita
-FROM Artist a
-JOIN Album al ON a.ArtistId = al.ArtistId
-JOIN Track t ON al.AlbumId = t.AlbumId
-JOIN InvoiceLine il ON t.TrackId = il.TrackId
-GROUP BY a.ArtistId"""
-        cursor.execute(query)
-        for row in cursor:
-            result.append((row["ArtistId"], row["popolarita"]))
-
-        cursor.close()
-        conn.close()
-        return result
-
-    @staticmethod
-    def getArchi(genere):
-        conn = DBConnect.get_connection()
-
-        result = []
-
-        cursor = conn.cursor(dictionary=True)
-        query = """SELECT DISTINCT  i.CustomerId, a.ArtistId
-FROM InvoiceLine il 
-JOIN Invoice i ON il.InvoiceId = il.InvoiceId 
-JOIN Track t ON il.TrackId = t.TrackId
-JOIN Album a ON a.AlbumId = t.AlbumId
-where t.GenreId = %s
-"""
+        query = """SELECT distinct art.ArtistId as  ArtistID,  art.Name as Name
+                    from artist art, album a, track t, genre g 
+                    where art.ArtistId = a.ArtistId 
+                    and t.AlbumId = a.AlbumId 
+                    and g.GenreId = t.GenreId 
+                    and g.Name = %s"""
 
         cursor.execute(query, (genere,))
+
         for row in cursor:
-            result.append((row["CustomerId"], row["ArtistId"]))
+            results.append(Artist(**row))
 
         cursor.close()
         conn.close()
-        return result
+        return results
+
+    @staticmethod
+    def getCustomerArtistCounts(genere):
+        conn = DBConnect.get_connection()
+
+        results = []
+
+        cursor = conn.cursor(dictionary=True)
+        query = """select i.CustomerId, art.ArtistId, count(*) as ntracks
+                    from invoice i, invoiceline i2, track t, genre g, artist art,album a
+                    where i.InvoiceId  = i2.InvoiceId 
+                    and t.TrackId = i2.TrackId 
+                    and t.AlbumId = a.AlbumId
+                    and g.GenreId = t.GenreId
+                    and art.ArtistId = a.ArtistId 
+                    and g.Name = %s
+                    group by i.CustomerId, art.ArtistId"""
+        cursor.execute(query, (genere,))
+
+        for row in cursor:
+            results.append((row["CustomerId"], row["ArtistId"], row["ntracks"]))
+
+        cursor.close()
+        conn.close()
+        return results
